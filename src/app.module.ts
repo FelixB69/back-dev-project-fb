@@ -3,6 +3,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SalaryModule } from './salary/salary.module';
+import { Salary } from './salary/salary.entity';
 
 @Module({
   imports: [
@@ -10,10 +11,10 @@ import { SalaryModule } from './salary/salary.module';
       type: 'mysql',
       host: 'localhost',
       port: 3306,
-      username: 'root',
-      password: 'root',
-      database: 'test',
-      entities: [],
+      username: 'felixB',
+      password: 'Bfeli3112!!',
+      database: 'devproject',
+      entities: [Salary],
       synchronize: true,
     }),
     SalaryModule,
