@@ -1,39 +1,35 @@
 import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { RemoteDetails } from './remote-details.entity';
 
 @Entity()
 export class Salary {
   @PrimaryGeneratedColumn('uuid')
-  id: number;
+  id: string;
 
-  @Column()
+  @Column({ nullable: true })
   company: string;
 
-  @Column()
-  position: string;
+  @Column({ nullable: true })
+  title: string;
 
-  @Column()
+  @Column({ nullable: true })
   location: string;
 
-  @Column('decimal') // Utilisé pour stocker la compensation
-  salary: number;
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  compensation: number;
 
-  @Column('timestamp') // Utilisé pour la date
+  @Column({ type: 'date', nullable: true })
   date: Date;
 
-  @Column()
+  @Column({ nullable: true })
   level: string;
 
-  @Column('int')
+  @Column({ type: 'int', nullable: true })
   company_xp: number;
 
-  @Column('int')
+  @Column({ type: 'int', nullable: true })
   total_xp: number;
 
-  @Column('json')
-  remote: {
-    variant: string;
-    dayCount: number;
-    base: string;
-    location: string;
-  };
+  @Column('json', { nullable: true })
+  remote: RemoteDetails;
 }

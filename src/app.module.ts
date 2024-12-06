@@ -15,6 +15,7 @@ import { Salary } from './salary/salary.entity';
       password: 'Bfeli3112!!',
       database: 'devproject',
       entities: [Salary],
+      autoLoadEntities: true,
       synchronize: true,
     }),
     SalaryModule,
