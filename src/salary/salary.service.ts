@@ -50,6 +50,80 @@ export class SalaryService {
     return this.salaryRepository.find({ where: { location: city } });
   }
 
+  async findWithFilters(filters: {
+    city?: string;
+    rangeName?: string;
+  }): Promise<Salary[]> {
+    const query = this.salaryRepository.createQueryBuilder('salary');
+
+    // Filtrer par ville, si spécifié
+    if (filters.city) {
+      query.andWhere('salary.location = :city', { city: filters.city });
+    }
+
+    // Filtrer par tranche de salaire, si spécifié
+    if (filters.rangeName) {
+      const ranges = {
+        under30k: { min: 0, max: 29999 },
+        between30kAnd40k: { min: 30000, max: 39999 },
+        between40kAnd50k: { min: 40000, max: 49999 },
+        between50kAnd70k: { min: 50000, max: 69999 },
+        between70kAnd100k: { min: 70000, max: 99999 },
+        over100k: { min: 100000, max: Infinity },
+      };
+
+      const selectedRange = ranges[filters.rangeName];
+
+      if (!selectedRange) {
+        console.warn('Tranche de salaire invalide spécifiée.');
+        return [];
+      }
+
+      query.andWhere('salary.compensation >= :min', { min: selectedRange.min });
+      if (selectedRange.max !== Infinity) {
+        query.andWhere('salary.compensation <= :max', {
+          max: selectedRange.max,
+        });
+      }
+    }
+
+    return query.getMany();
+  }
+
+  async calculateSalaryRanges() {
+    const salaries = await this.salaryRepository.find();
+    const totalSalaries = salaries.length;
+
+    if (totalSalaries === 0) {
+      return [];
+    }
+
+    const ranges = [
+      { name: 'under30k', min: 0, max: 29999 },
+      { name: 'between30kAnd40k', min: 30000, max: 39999 },
+      { name: 'between40kAnd50k', min: 40000, max: 49999 },
+      { name: 'between50kAnd70k', min: 50000, max: 69999 },
+      { name: 'between70kAnd100k', min: 70000, max: 99999 },
+      { name: 'over100k', min: 100000, max: Infinity },
+    ];
+
+    const salaryRanges = ranges.map((range) => {
+      const count = salaries.filter(
+        (s) => s.compensation >= range.min && s.compensation <= range.max,
+      ).length;
+
+      const percentage = ((count / totalSalaries) * 100).toFixed(2);
+
+      return {
+        name: range.name,
+        count,
+        percentage: parseFloat(percentage), // Convertir en nombre pour éviter de manipuler des chaînes
+      };
+    });
+
+    return salaryRanges;
+  }
+
   // POST DATA IN DB
   async createSalary(createSalaryDto: CreateSalaryDto) {
     const newSalary = this.salaryRepository.create({

@@ -15,7 +15,7 @@ export class Salary {
   @Column({ nullable: true })
   location: string;
 
-  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'int', nullable: true })
   compensation: number;
 
   @Column({ type: 'date', nullable: true })
