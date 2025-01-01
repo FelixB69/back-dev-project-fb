@@ -33,6 +33,12 @@ export class SalaryController {
   async getSalaryRanges() {
     return await this.salaryService.calculateSalaryRanges();
   }
+
+  @Get('datas')
+  async getGlobalDatas() {
+    return await this.salaryService.getGlobalDatas();
+  }
+
   @Get('filter')
   async getSalariesWithFilters(
     @Query('city') city?: string,

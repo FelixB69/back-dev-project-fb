@@ -12,9 +12,9 @@ interface SalaryAPIResponse {
   title: string;
   location: string;
   compensation: number;
-  date: string; // La date dans l'API est probablement une chaîne
+  date: string;
   level: string;
-  company_xp?: number; // Les champs optionnels sont marqués avec `?`
+  company_xp?: number;
   total_xp?: number;
   remote: {
     variant: string;
@@ -57,12 +57,12 @@ export class SalaryService {
   }): Promise<Salary[]> {
     const query = this.salaryRepository.createQueryBuilder('salary');
 
-    // Filtrer par ville, si spécifié
+    // Filter by city
     if (filters.city) {
       query.andWhere('salary.location = :city', { city: filters.city });
     }
 
-    // Filtrer par tranche de salaire, si spécifié
+    // Filter by range
     if (filters.rangeName) {
       const selectedRange = ranges.find(
         (range) => range.name === filters.rangeName,
@@ -102,18 +102,60 @@ export class SalaryService {
       return {
         name: range.name,
         count,
-        percentage: parseFloat(percentage), // Convertir en nombre pour éviter de manipuler des chaînes
+        percentage: parseFloat(percentage),
       };
     });
 
     return salaryRanges;
   }
 
+  calculateMedian(salary) {
+    if (!Array.isArray(salary) || salary.length === 0) {
+      throw new Error('Le tableau des salaires doit être non vide.');
+    }
+
+    // Sort ascending datas
+    const sortSalaries = salary.slice().sort((a, b) => a - b);
+
+    const n = sortSalaries.length;
+    const middle = Math.floor(n / 2);
+
+    // Check if length number is even or odd
+    if (n % 2 === 0) {
+      // even
+      return (sortSalaries[middle - 1] + sortSalaries[middle]) / 2;
+    } else {
+      // odd
+      return sortSalaries[middle];
+    }
+  }
+
+  async getGlobalDatas() {
+    const salaries = await this.salaryRepository.find();
+    const totalSalaries = salaries.length;
+    const totalCompensation = salaries.reduce(
+      (acc, curr) => acc + curr.compensation,
+      0,
+    );
+
+    const averageCompensation = totalCompensation / totalSalaries;
+
+    const medianCompensation = this.calculateMedian(
+      salaries.map((s) => s.compensation),
+    );
+
+    return {
+      totalSalaries,
+      averageCompensation,
+      medianCompensation,
+    };
+  }
+
   // POST DATA IN DB
   async createSalary(createSalaryDto: CreateSalaryDto) {
     const newSalary = this.salaryRepository.create({
       ...createSalaryDto,
-      date: new Date(), // Date actuelle
+      date: new Date(),
     });
     return await this.salaryRepository.save(newSalary);
   }
