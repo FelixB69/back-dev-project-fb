@@ -47,6 +47,11 @@ export class SalaryController {
     return this.salaryService.findWithFilters({ city, rangeName });
   }
 
+  @Get('cities')
+  async getCities(): Promise<string[]> {
+    return await this.salaryService.findCities();
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<Salary> {
     return this.salaryService.findOne(id);

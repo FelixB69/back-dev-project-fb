@@ -42,6 +42,15 @@ export class SalaryService {
     return this.salaryRepository.findOneBy({ id });
   }
 
+  async findCities() {
+    const cities = await this.salaryRepository
+      .createQueryBuilder('salary')
+      .select('DISTINCT salary.location', 'location')
+      .getRawMany();
+
+    return cities.map((city) => city.location);
+  }
+
   async findByCity(city: string): Promise<Salary[]> {
     if (!city) {
       console.warn('Aucune ville spécifiée pour le filtre.');
