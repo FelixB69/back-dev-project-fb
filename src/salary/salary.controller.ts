@@ -11,10 +11,13 @@ export class SalaryController {
   // ROUTES TO POST AND FETCH
 
   @Get('fetch')
-  async fetchAndSave(): Promise<string> {
+  async fetchAndSave(): Promise<{ message: string }> {
     console.log('Route /salaries/fetch atteinte'); // Ajoutez ce log
     await this.salaryService.fetchAndSaveSalaries();
-    return "Les données de l'API ont été insérées avec succès dans la base de données.";
+    return {
+      message:
+        "Les données de l'API ont été insérées avec succès dans la base de données.",
+    };
   }
 
   @Post()
@@ -43,8 +46,9 @@ export class SalaryController {
   async getSalariesWithFilters(
     @Query('city') city?: string,
     @Query('rangeName') rangeName?: string,
+    @Query('year') year?: string,
   ): Promise<Salary[]> {
-    return this.salaryService.findWithFilters({ city, rangeName });
+    return this.salaryService.findWithFilters({ city, rangeName, year });
   }
 
   @Get('cities')

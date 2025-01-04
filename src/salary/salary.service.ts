@@ -5,7 +5,7 @@ import { Salary } from './salary.entity';
 import { Repository } from 'typeorm';
 import { CreateSalaryDto } from './create-salary.dto';
 import axios from 'axios';
-import { ranges } from './salaryConstant';
+import { ranges, years } from './salaryConstant';
 
 interface SalaryAPIResponse {
   company: string;
@@ -63,12 +63,16 @@ export class SalaryService {
   async findWithFilters(filters: {
     city?: string;
     rangeName?: string;
+    year?: string;
   }): Promise<Salary[]> {
     const query = this.salaryRepository.createQueryBuilder('salary');
 
     // Filter by city
     if (filters.city) {
-      query.andWhere('salary.location = :city', { city: filters.city });
+      query.andWhere('LOWER(salary.location) = LOWER(:city)', {
+        city: filters.city,
+      });
+      console.log('City filter applied:', filters.city);
     }
 
     // Filter by range
@@ -82,15 +86,43 @@ export class SalaryService {
         return [];
       }
 
-      query.andWhere('salary.compensation >= :min', { min: selectedRange.min });
+      query.andWhere('salary.compensation >= :compMin', {
+        compMin: selectedRange.min,
+      });
+
       if (selectedRange.max !== Infinity) {
-        query.andWhere('salary.compensation <= :max', {
-          max: selectedRange.max,
+        query.andWhere('salary.compensation <= :compMax', {
+          compMax: selectedRange.max,
         });
       }
+      console.log('Range filter applied:', selectedRange);
     }
 
-    return query.getMany();
+    // Filter by year (excluding N/A values)
+    if (filters.year) {
+      const selectedYear = years.find((year) => year.name === filters.year);
+
+      if (!selectedYear) {
+        console.warn('Année invalide spécifiée.');
+        return [];
+      }
+
+      // Exclude NULL values and filter for the range
+      query.andWhere(
+        'salary.total_xp IS NOT NULL AND salary.total_xp >= :min',
+        { min: selectedYear.min },
+      );
+
+      if (selectedYear.max !== Infinity) {
+        query.andWhere('salary.total_xp <= :max', { max: selectedYear.max });
+      }
+      console.log('Year filter applied:', selectedYear);
+    }
+
+    // Execute the query
+    const results = await query.getMany();
+
+    return results;
   }
 
   async calculateSalaryRanges() {
