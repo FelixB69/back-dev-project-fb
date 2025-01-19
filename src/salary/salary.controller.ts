@@ -37,6 +37,11 @@ export class SalaryController {
     return await this.salaryService.calculateSalaryRanges();
   }
 
+  @Get('years')
+  async getSalaryYears() {
+    return await this.salaryService.calculateSalaryByYear();
+  }
+
   @Get('datas')
   async getGlobalDatas() {
     return await this.salaryService.getGlobalDatas();

@@ -125,7 +125,26 @@ export class SalaryService {
     return results;
   }
 
+  async calculateSalaryByYear() {
+    return this.calculateStatistics(
+      years,
+      (salary, range) =>
+        salary.total_xp >= range.min && salary.total_xp <= range.max,
+    );
+  }
+
   async calculateSalaryRanges() {
+    return this.calculateStatistics(
+      ranges,
+      (salary, range) =>
+        salary.compensation >= range.min && salary.compensation <= range.max,
+    );
+  }
+
+  private async calculateStatistics(
+    ranges: { name: string; min: number; max: number }[],
+    filterFn: (salary: Salary, range: { min: number; max: number }) => boolean,
+  ) {
     const salaries = await this.salaryRepository.find();
     const totalSalaries = salaries.length;
 
@@ -133,21 +152,39 @@ export class SalaryService {
       return [];
     }
 
-    const salaryRanges = ranges.map((range) => {
-      const count = salaries.filter(
-        (s) => s.compensation >= range.min && s.compensation <= range.max,
-      ).length;
+    return ranges.map((range) => {
+      // Filtrer les salaires selon la fonction passée
+      const filteredSalaries = salaries.filter((s) => filterFn(s, range));
+      const salariesValues = filteredSalaries.map((s) => s.compensation);
 
-      const percentage = ((count / totalSalaries) * 100).toFixed(2);
+      const count = filteredSalaries.length;
+      const percentage = this.calculatePercentage(count, totalSalaries);
+      const average = this.calculateAverage(salariesValues);
+      const median = this.calculateMedianSafe(salariesValues);
 
       return {
         name: range.name,
         count,
-        percentage: parseFloat(percentage),
+        percentage,
+        average,
+        median,
       };
     });
+  }
 
-    return salaryRanges;
+  private calculatePercentage(count: number, total: number): number {
+    return parseFloat(((count / total) * 100).toFixed(2));
+  }
+
+  private calculateAverage(values: number[]): number {
+    if (values.length === 0) return 0;
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return parseFloat((total / values.length).toFixed(2));
+  }
+
+  private calculateMedianSafe(values: number[]): number {
+    if (values.length === 0) return 0;
+    return this.calculateMedian(values);
   }
 
   calculateMedian(salary) {
