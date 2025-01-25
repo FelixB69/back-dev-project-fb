@@ -32,6 +32,11 @@ export class SalaryController {
     return this.salaryService.findAll();
   }
 
+  @Get('city')
+  async getSalaryCity() {
+    return await this.salaryService.calculateSalaryByCity();
+  }
+
   @Get('ranges')
   async getSalaryRanges() {
     return await this.salaryService.calculateSalaryRanges();
@@ -59,6 +64,12 @@ export class SalaryController {
   @Get('cities')
   async getCities(): Promise<string[]> {
     return await this.salaryService.findCities();
+  }
+
+  @Get('score')
+  async getScore() {
+    console.log('Route /salaries/score atteinte'); // Ajoutez ce log
+    return await this.salaryService.calculateCoherenceScores();
   }
 
   @Get(':id')

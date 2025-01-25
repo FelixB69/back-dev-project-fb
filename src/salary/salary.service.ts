@@ -5,7 +5,7 @@ import { Salary } from './salary.entity';
 import { Repository } from 'typeorm';
 import { CreateSalaryDto } from './create-salary.dto';
 import axios from 'axios';
-import { ranges, years } from './salaryConstant';
+import { cities, ranges, years } from './salaryConstant';
 
 interface SalaryAPIResponse {
   company: string;
@@ -141,9 +141,14 @@ export class SalaryService {
     );
   }
 
+  async calculateSalaryByCity() {
+    return this.calculateStatistics(undefined, undefined, cities);
+  }
+
   private async calculateStatistics(
-    ranges: { name: string; min: number; max: number }[],
-    filterFn: (salary: Salary, range: { min: number; max: number }) => boolean,
+    ranges?: { name: string; min: number; max: number }[],
+    filterFn?: (salary: Salary, range: { min: number; max: number }) => boolean,
+    cities?: string[],
   ) {
     const salaries = await this.salaryRepository.find();
     const totalSalaries = salaries.length;
@@ -152,34 +157,67 @@ export class SalaryService {
       return [];
     }
 
-    return ranges.map((range) => {
-      // Filtrer les salaires selon la fonction passée
-      const filteredSalaries = salaries.filter((s) => filterFn(s, range));
-      const salariesValues = filteredSalaries.map((s) => s.compensation);
+    if (cities) {
+      return cities.map((city) => {
+        const filteredByCity =
+          city === 'Autre'
+            ? salaries.filter((s) => !cities.includes(s.location))
+            : salaries.filter((s) => s.location === city);
+        const totalFilteredByCity = filteredByCity.length;
 
-      const count = filteredSalaries.length;
-      const percentage = this.calculatePercentage(count, totalSalaries);
-      const average = this.calculateAverage(salariesValues);
-      const median = this.calculateMedianSafe(salariesValues);
+        if (totalFilteredByCity === 0) {
+          return []; // Si aucune donnée pour cette ville, on retourne un tableau vide
+        }
 
-      return {
-        name: range.name,
-        count,
-        percentage,
-        average,
-        median,
-      };
-    });
+        const salariesValues = filteredByCity.map((s) => s.compensation);
+
+        const count = filteredByCity.length;
+        const percentage = this.calculatePercentage(count, totalSalaries);
+        const average = this.calculateAverage(salariesValues);
+        const median = this.calculateMedianSafe(salariesValues);
+
+        return {
+          name: city, // Le nom de la ville
+          count,
+          percentage,
+          average,
+          median,
+        };
+      });
+    }
+
+    if (ranges) {
+      return ranges.map((range) => {
+        // Filtrer les salaires selon la fonction passée
+        const filteredSalaries = salaries.filter((s) => filterFn(s, range));
+        const salariesValues = filteredSalaries.map((s) => s.compensation);
+
+        const count = filteredSalaries.length;
+        const percentage = this.calculatePercentage(count, totalSalaries);
+        const average = this.calculateAverage(salariesValues);
+        const median = this.calculateMedianSafe(salariesValues);
+
+        return {
+          name: range.name,
+          count,
+          percentage,
+          average,
+          median,
+        };
+      });
+    }
+
+    return 'No data';
   }
 
   private calculatePercentage(count: number, total: number): number {
-    return parseFloat(((count / total) * 100).toFixed(2));
+    return parseFloat(((count / total) * 100).toFixed());
   }
 
   private calculateAverage(values: number[]): number {
     if (values.length === 0) return 0;
     const total = values.reduce((sum, value) => sum + value, 0);
-    return parseFloat((total / values.length).toFixed(2));
+    return parseFloat((total / values.length).toFixed());
   }
 
   private calculateMedianSafe(values: number[]): number {
@@ -216,17 +254,98 @@ export class SalaryService {
       0,
     );
 
-    const averageCompensation = totalCompensation / totalSalaries;
+    const averageCompensation = parseFloat(
+      (totalCompensation / totalSalaries).toFixed(),
+    );
 
     const medianCompensation = this.calculateMedian(
       salaries.map((s) => s.compensation),
     );
 
+    const lowestSalary = Math.min(
+      ...salaries
+        .filter((s) => s.compensation > 20000)
+        .map((s) => s.compensation),
+    );
+    const highestSalary = Math.max(...salaries.map((s) => s.compensation));
+
     return {
       totalSalaries,
       averageCompensation,
       medianCompensation,
+      lowestSalary,
+      highestSalary,
     };
+  }
+
+  async calculateCoherenceScores(): Promise<{ id: string; score: number }[]> {
+    const salaries = await this.salaryRepository.find();
+
+    if (!salaries.length) {
+      throw new Error('Aucune donnée de salaire disponible.');
+    }
+
+    return salaries.map((salary) => {
+      const sameLocation = salaries.filter(
+        (s) => s.location === salary.location && s.compensation,
+      );
+
+      const sameExperience = salaries.filter(
+        (s) => s.total_xp === salary.total_xp && s.compensation,
+      );
+
+      const sameLocationAndExperience = salaries.filter(
+        (s) =>
+          s.location === salary.location &&
+          s.total_xp === salary.total_xp &&
+          s.compensation,
+      );
+
+      // Moyennes pour les comparaisons
+      const avgSameLocation = this.calculateAverage(
+        sameLocation.map((s) => s.compensation),
+      );
+      const avgSameExperience = this.calculateAverage(
+        sameExperience.map((s) => s.compensation),
+      );
+      const avgSameLocationAndExperience = this.calculateAverage(
+        sameLocationAndExperience.map((s) => s.compensation),
+      );
+
+      // Calcul des scores individuels
+      const locationScore =
+        avgSameLocation > 0
+          ? 1 -
+            Math.abs(salary.compensation - avgSameLocation) / avgSameLocation
+          : 0;
+
+      const experienceScore =
+        avgSameExperience > 0
+          ? 1 -
+            Math.abs(salary.compensation - avgSameExperience) /
+              avgSameExperience
+          : 0;
+
+      const locationAndExperienceScore =
+        avgSameLocationAndExperience > 0
+          ? 1 -
+            Math.abs(salary.compensation - avgSameLocationAndExperience) /
+              avgSameLocationAndExperience
+          : 0;
+
+      // Pondération des scores
+      const finalScore =
+        0.5 * locationAndExperienceScore +
+        0.25 * locationScore +
+        0.25 * experienceScore;
+
+      // Retourne la note normalisée entre 1 et 10
+
+      return {
+        id: salary.id,
+        score: parseFloat(Math.max(1, Math.min(10, finalScore * 10)).toFixed()),
+      };
+    });
   }
 
   // POST DATA IN DB

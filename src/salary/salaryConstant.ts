@@ -15,3 +15,17 @@ export const years = [
   { name: 'between10yearAnd15year', min: 10, max: 14.99 },
   { name: 'over15year', min: 15, max: Infinity },
 ];
+
+export const cities = [
+  'Lyon',
+  'Paris',
+  'Marseille',
+  'Bordeaux',
+  'Remote',
+  'Nantes',
+  'Toulouse',
+  'Lille',
+  'Suisse',
+  'Montpellier',
+  'Autre',
+];
