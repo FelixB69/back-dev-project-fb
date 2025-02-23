@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    container_name: nestjs_app
+    restart: always
+    ports:
+      - '3000:3000'
+    depends_on:
+      - db
+    env_file:
+      - .env
+    volumes:
+      - ./usr/src/app
+      - /usr/src/app/node_modules
+
+  db:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: always
+    env_file:
+      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - '3306:3306'
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  db_data:
+
