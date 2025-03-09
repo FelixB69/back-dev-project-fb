@@ -1,0 +1,4 @@
+CREATE DATABASE devproject;
+
+GRANT ALL PRIVILEGES ON devproject.* TO 'felixB'@'%';
+FLUSH PRIVILEGES;
