@@ -11,7 +11,7 @@ dotenv.config();
 @Module({
   imports: [
     TypeOrmModule.forRoot({
-      type: 'mysql',
+      type: 'mariadb',
       host: process.env.DB_HOST,
       port: parseInt(process.env.DB_PORT, 10) || 3306,
       username: process.env.DB_USERNAME,
@@ -20,6 +20,8 @@ dotenv.config();
       entities: [Salary],
       autoLoadEntities: true,
       synchronize: true,
+      retryAttempts: 10, // Attendre si la DB n'est pas prête
+      retryDelay: 5000,
     }),
     SalaryModule,
   ],

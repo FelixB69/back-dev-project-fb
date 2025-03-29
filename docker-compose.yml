@@ -11,20 +11,22 @@ services:
       - "3000"
     depends_on:
       - db
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+      MARIADB_DATABASE: ${DB_DATABASE}
+      MARIADB_USER: ${DB_USERNAME}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      DB_PASSWORD: ${DB_PASSWORD:-root}  # Utilisation de variables d'environnement simples
 
   db:
-    image: mysql:8.0
-    container_name: mysql_db
+    image: mariadb:10.5
+    container_name: mariadb_db
     restart: always
-    env_file:
-      - .env
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
-      MYSQL_DATABASE: ${DB_DATABASE}
-      MYSQL_USER: ${DB_USERNAME}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - '3306:3306'
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+      MARIADB_DATABASE: ${DB_DATABASE}
+      MARIADB_USER: ${DB_USERNAME}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
     volumes:
       - db_data:/var/lib/mysql
       - ./dump.sql:/docker-entrypoint-initdb.d/init.sql
@@ -39,6 +41,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /etc/ssl/certs/dhparam.pem:/etc/ssl/certs/dhparam.pem:ro  # Lier le fichier dhparam.pem
     depends_on:
       - backend
 

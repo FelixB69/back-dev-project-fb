@@ -1,4 +1,4 @@
-CREATE DATABASE devproject;
+CREATE DATABASE IF NOT EXISTS devproject;
 
 GRANT ALL PRIVILEGES ON devproject.* TO 'felixB'@'%';
 FLUSH PRIVILEGES;
