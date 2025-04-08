@@ -9,7 +9,7 @@ async function bootstrap() {
 
   // Activez CORS avant d'écouter
   app.enableCors({
-    origin: 'https://dev-rh.felixberger.fr', // Adresse du frontend Angular
+    origin: ['https://dev-rh.felixberger.fr', 'http://localhost:3001'], // Adresse du frontend
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE', // Méthodes autorisées
     credentials: true, // Si vous utilisez des cookies ou des sessions
   });

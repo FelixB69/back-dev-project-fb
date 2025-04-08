@@ -12,7 +12,7 @@ export class SalaryController {
 
   @Get('fetch')
   async fetchAndSave(): Promise<{ message: string }> {
-    console.log('Route /salaries/fetch atteinte'); // Ajoutez ce log
+    console.log('Route /salaries/fetch atteinte');
     await this.salaryService.fetchAndSaveSalaries();
     return {
       message:
@@ -68,7 +68,7 @@ export class SalaryController {
 
   @Get('score')
   async getScore() {
-    console.log('Route /salaries/score atteinte'); // Ajoutez ce log
+    console.log('Route /salaries/score atteinte');
     return await this.salaryService.calculateCoherenceScores();
   }
 

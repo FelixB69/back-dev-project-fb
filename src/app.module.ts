@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SalaryModule } from './salary/salary.module';
 import { Salary } from './salary/salary.entity';
 import * as dotenv from 'dotenv';
+import { ScoreModule } from './score/score.module';
 
 dotenv.config();
 
@@ -12,7 +13,7 @@ dotenv.config();
   imports: [
     TypeOrmModule.forRoot({
       type: 'mariadb',
-      host: process.env.DB_HOST,
+      host: process.env.DB_HOST || 'localhost',
       port: parseInt(process.env.DB_PORT, 10) || 3306,
       username: process.env.DB_USERNAME,
       password: process.env.DB_PASSWORD,
@@ -24,6 +25,7 @@ dotenv.config();
       retryDelay: 5000,
     }),
     SalaryModule,
+    ScoreModule,
   ],
   controllers: [AppController],
   providers: [AppService],
