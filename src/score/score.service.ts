@@ -207,47 +207,19 @@ export class ScoreService {
   public async calculateStatistics(target: Score): Promise<any> {
     const salaries = await this.salaryService.findAll();
 
-    // Similarity scores with other entries
     const scores = await Promise.all(
       salaries.map((comparison) =>
         this.calculateSimilarityScore(target, comparison),
       ),
     );
 
+    const meanScore = this.calculateMean(scores);
+    const stdScore = this.calculateStd(scores, meanScore);
+
     const coherenceScore = await this.calculateCoherenceScore(target);
     const predictedCompensation = await this.predictCompensation(target);
     const actualCompensation = target.compensation;
 
-    // Statistics and distributions
-    const percentiles = this.calculateCommonPercentiles(scores);
-    const meanScore = this.calculateMean(scores);
-    const stdScore = this.calculateStd(scores, meanScore);
-    const minScore = Math.min(...scores);
-    const maxScore = Math.max(...scores);
-    const medianScore = this.calculateMedian(scores);
-    const quartiles = this.calculateQuartiles(scores);
-    const numHigher = scores.filter((s) => s > coherenceScore).length;
-    const numLower = scores.filter((s) => s < coherenceScore).length;
-
-    const histogramBuckets = this.buildHistogram(scores, 10);
-
-    // Generate comment based on coherence score
-    let coherenceComment = '';
-    if (coherenceScore > 0.85) {
-      coherenceComment =
-        'Ton salaire est parfaitement cohérent avec ton parcours 👌';
-    } else if (coherenceScore > 0.6) {
-      coherenceComment =
-        'Ton salaire est globalement cohérent avec ton parcours ✅';
-    } else if (coherenceScore > 0.4) {
-      coherenceComment =
-        'Ton salaire semble un peu décalé par rapport à ton profil 🤔';
-    } else {
-      coherenceComment =
-        'Ton salaire est très atypique par rapport à ton profil 🔎';
-    }
-
-    // Determine salary percentile and label
     const salaryValues = salaries
       .map((s) => s.compensation)
       .sort((a, b) => a - b);
@@ -256,37 +228,92 @@ export class ScoreService {
       actualCompensation,
     );
 
-    let salaryPercentileLabel = '';
-    if (percentileRank >= 90) salaryPercentileLabel = 'top 10%';
-    else if (percentileRank >= 75) salaryPercentileLabel = 'top 25%';
-    else if (percentileRank >= 50)
-      salaryPercentileLabel = 'dans la moyenne haute';
-    else if (percentileRank >= 25)
-      salaryPercentileLabel = 'dans la moyenne basse';
-    else salaryPercentileLabel = 'parmi les 25% les moins payés';
-
+    const numHigher = scores.filter((s) => s > coherenceScore).length;
+    const numLower = scores.filter((s) => s < coherenceScore).length;
     const similarPercentage = Math.round(
       (numLower / (numHigher + numLower)) * 100,
     );
-    const similarPeopleComparison = `Tu gagnes plus que ${similarPercentage}% des personnes avec un profil comparable`;
+
+    const coherenceComment =
+      coherenceScore > 0.85
+        ? 'Ton salaire est parfaitement cohérent avec ton parcours'
+        : coherenceScore > 0.6
+          ? 'Ton salaire est globalement cohérent avec ton parcours'
+          : coherenceScore > 0.4
+            ? 'Ton salaire semble un peu décalé par rapport à ton profil'
+            : 'Ton salaire est très atypique par rapport à ton profil';
+
+    const averageByXp = this.computeAverageSalaryByExperience(salaries);
 
     return {
+      diagnostic: {
+        title:
+          coherenceScore > 0.8
+            ? 'Parfaitement aligné 👌'
+            : coherenceScore > 0.6
+              ? 'Globalement cohérent ✅'
+              : coherenceScore > 0.4
+                ? 'Léger décalage 🤔'
+                : 'Atypique 🔎',
+        icon:
+          coherenceScore > 0.85
+            ? '👌'
+            : coherenceScore > 0.6
+              ? '✅'
+              : coherenceScore > 0.4
+                ? '🤔'
+                : '🔎',
+        description: coherenceComment,
+      },
+
+      estimatedGap: {
+        predicted: Math.round(predictedCompensation),
+        actual: Math.round(actualCompensation),
+        difference: Math.round(actualCompensation - predictedCompensation),
+        percentage: +(
+          ((actualCompensation - predictedCompensation) /
+            predictedCompensation) *
+          100
+        ).toFixed(1),
+        comment:
+          actualCompensation > predictedCompensation
+            ? 'Tu gagnes plus que ce qui est estimé pour ton profil.'
+            : actualCompensation < predictedCompensation
+              ? 'Tu gagnes moins que ce qui est estimé pour ton profil.'
+              : 'Tu gagnes exactement ce qui est attendu.',
+      },
+
+      salaryPosition: {
+        percentile: percentileRank,
+        rankLabel:
+          percentileRank >= 90
+            ? 'top 10%'
+            : percentileRank >= 75
+              ? 'top 25%'
+              : percentileRank >= 50
+                ? 'moyenne haute'
+                : percentileRank >= 25
+                  ? 'moyenne basse'
+                  : 'bas de l’échelle',
+        comparison: `Tu gagnes plus que ${similarPercentage}% des personnes avec un profil comparable.`,
+      },
+
+      conseil:
+        coherenceScore > 0.7 &&
+        actualCompensation < predictedCompensation &&
+        (predictedCompensation - actualCompensation) / predictedCompensation >
+          0.1
+          ? 'Tu pourrais envisager de négocier une revalorisation salariale.'
+          : 'Reste dans ta zone de confort et continue de progresser dans ta carrière',
+
       coherenceScore,
-      predictedCompensation,
-      actualCompensation,
-      percentiles,
       meanScore,
       stdScore,
-      minScore,
-      maxScore,
-      medianScore,
-      quartiles,
-      numHigher,
-      numLower,
-      histogramBuckets,
-      salaryPercentileLabel,
-      similarPeopleComparison,
-      coherenceComment,
+
+      chartData: {
+        averageByXp,
+        histogram: this.buildHistogram(scores, 10),
+      },
     };
   }
 
@@ -294,6 +321,25 @@ export class ScoreService {
   private getPercentileRank(sorted: number[], value: number): number {
     const below = sorted.filter((v) => v < value).length;
     return Math.round((below / sorted.length) * 100);
+  }
+
+  private computeAverageSalaryByExperience(
+    data: Salary[],
+  ): { xp: number; average: number }[] {
+    const grouped = new Map<number, number[]>();
+
+    for (const item of data) {
+      const xp = Math.round(item.total_xp ?? 0);
+      if (!grouped.has(xp)) grouped.set(xp, []);
+      grouped.get(xp)?.push(item.compensation);
+    }
+
+    const result = [...grouped.entries()].map(([xp, comps]) => ({
+      xp,
+      average: Math.round(comps.reduce((a, b) => a + b, 0) / comps.length),
+    }));
+
+    return result.sort((a, b) => a.xp - b.xp);
   }
 
   // Build histogram from score distribution
