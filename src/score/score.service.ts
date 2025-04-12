@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { SalaryService } from '../salary/salary.service';
 import { Salary } from '../salary/salary.entity';
 import { Score } from './score.entity';
+import { ScoreCalcul } from './score-calcul';
 
 @Injectable()
 export class ScoreService {
@@ -22,7 +23,10 @@ export class ScoreService {
   // Min/max range for normalizing the output (compensation)
   private outputMinMax: [number, number];
 
-  constructor(private readonly salaryService: SalaryService) {
+  constructor(
+    private readonly salaryService: SalaryService,
+    private readonly scoreCalcul: ScoreCalcul,
+  ) {
     // Initialize the model on service creation
     this.modelReady = this.initializeModel();
   }
@@ -102,60 +106,12 @@ export class ScoreService {
   }
 
   // Compare a profile with another to compute a similarity score
-  private async calculateSimilarityScore(
-    target: Score,
-    comparison: Salary,
-  ): Promise<number> {
-    let score = 0;
+  private async calculateSimilarityScore(comparison: Score): Promise<number> {
+    const predicted = await this.predictCompensation(comparison);
+    const actual = comparison.compensation;
 
-    // Define weight for each feature
-    const weights = {
-      compensation: 0.5,
-      company_xp: 0.2,
-      total_xp: 0.2,
-      location: 0.1,
-    };
-
-    const salaries = await this.salaryService.findAll();
-
-    // Normalize compensation and compute difference
-    const minCompensation = Math.min(...salaries.map((d) => d.compensation));
-    const maxCompensation = Math.max(...salaries.map((d) => d.compensation));
-    const compensationScore =
-      1 -
-      Math.abs(
-        this.normalizeValue(
-          target.compensation,
-          minCompensation,
-          maxCompensation,
-        ) -
-          this.normalizeValue(
-            comparison.compensation,
-            minCompensation,
-            maxCompensation,
-          ),
-      );
-    score += compensationScore * weights.compensation;
-
-    // Compare total experience if available
-    if (target.total_xp !== null && comparison.total_xp !== null) {
-      const totalXp = salaries
-        .filter((d) => d.total_xp !== null)
-        .map((d) => d.total_xp!);
-      const minTotalXp = Math.min(...totalXp);
-      const maxTotalXp = Math.max(...totalXp);
-      const totalXpScore =
-        1 -
-        Math.abs(
-          this.normalizeValue(target.total_xp, minTotalXp, maxTotalXp) -
-            this.normalizeValue(comparison.total_xp, minTotalXp, maxTotalXp),
-        );
-      score += totalXpScore * weights.total_xp;
-    }
-
-    // Compare locations (binary match)
-    const locationScore = target.location === comparison.location ? 1 : 0;
-    score += locationScore * weights.location;
+    const score =
+      actual === 0 ? 0 : 1 - Math.abs((actual - predicted) / actual); // comme coherenceScore
 
     return score;
   }
@@ -208,13 +164,22 @@ export class ScoreService {
     const salaries = await this.salaryService.findAll();
 
     const scores = await Promise.all(
-      salaries.map((comparison) =>
-        this.calculateSimilarityScore(target, comparison),
-      ),
+      salaries.map((comparison) => {
+        const infos = {
+          location: comparison.location,
+          total_xp: comparison.total_xp,
+          company_xp: comparison.company_xp,
+          compensation: comparison.compensation,
+          id: comparison.id,
+          createdAt: comparison.date,
+        };
+
+        return this.calculateSimilarityScore(infos); // ← il faut le `return` ici !
+      }),
     );
 
-    const meanScore = this.calculateMean(scores);
-    const stdScore = this.calculateStd(scores, meanScore);
+    const meanScore = this.scoreCalcul.calculateMean(scores);
+    const stdScore = this.scoreCalcul.calculateStd(scores, meanScore);
 
     const coherenceScore = await this.calculateCoherenceScore(target);
     const predictedCompensation = await this.predictCompensation(target);
@@ -223,7 +188,7 @@ export class ScoreService {
     const salaryValues = salaries
       .map((s) => s.compensation)
       .sort((a, b) => a - b);
-    const percentileRank = this.getPercentileRank(
+    const percentileRank = this.scoreCalcul.getPercentileRank(
       salaryValues,
       actualCompensation,
     );
@@ -235,7 +200,7 @@ export class ScoreService {
     );
 
     const coherenceComment =
-      coherenceScore > 0.85
+      coherenceScore > 0.8
         ? 'Ton salaire est parfaitement cohérent avec ton parcours'
         : coherenceScore > 0.6
           ? 'Ton salaire est globalement cohérent avec ton parcours'
@@ -256,7 +221,7 @@ export class ScoreService {
                 ? 'Léger décalage 🤔'
                 : 'Atypique 🔎',
         icon:
-          coherenceScore > 0.85
+          coherenceScore > 0.8
             ? '👌'
             : coherenceScore > 0.6
               ? '✅'
@@ -317,12 +282,6 @@ export class ScoreService {
     };
   }
 
-  // Calculate the percentile rank of a value
-  private getPercentileRank(sorted: number[], value: number): number {
-    const below = sorted.filter((v) => v < value).length;
-    return Math.round((below / sorted.length) * 100);
-  }
-
   private computeAverageSalaryByExperience(
     data: Salary[],
   ): { xp: number; average: number }[] {
@@ -357,62 +316,5 @@ export class ScoreService {
       range: `${(i / numBuckets).toFixed(1)}–${((i + 1) / numBuckets).toFixed(1)}`,
       count,
     }));
-  }
-
-  // Mean calculation
-  private calculateMean(scores: number[]): number {
-    return scores.reduce((sum, score) => sum + score, 0) / scores.length;
-  }
-
-  // Standard deviation calculation
-  private calculateStd(scores: number[], mean: number): number {
-    const variance =
-      scores.reduce((sum, score) => sum + Math.pow(score - mean, 2), 0) /
-      scores.length;
-    return Math.sqrt(variance);
-  }
-
-  // Median calculation
-  private calculateMedian(scores: number[]): number {
-    const sorted = [...scores].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 !== 0
-      ? sorted[mid]
-      : (sorted[mid - 1] + sorted[mid]) / 2;
-  }
-
-  // Calculate quartiles (Q1, Q2, Q3)
-  private calculateQuartiles(scores: number[]): number[] {
-    const sorted = [...scores].sort((a, b) => a - b);
-    const q1 = this.percentile(sorted, 25);
-    const q2 = this.percentile(sorted, 50);
-    const q3 = this.percentile(sorted, 75);
-    return [q1, q2, q3];
-  }
-
-  // Common percentiles (p10, p25, p50, etc.)
-  private calculateCommonPercentiles(scores: number[]): Record<string, number> {
-    const sorted = [...scores].sort((a, b) => a - b);
-    return {
-      p10: this.percentile(sorted, 10),
-      p25: this.percentile(sorted, 25),
-      p50: this.percentile(sorted, 50),
-      p75: this.percentile(sorted, 75),
-      p90: this.percentile(sorted, 90),
-    };
-  }
-
-  // Interpolated percentile calculation
-  private percentile(sorted: number[], percentile: number): number {
-    const index = (sorted.length - 1) * (percentile / 100);
-    const lower = Math.floor(index);
-    const upper = lower + 1;
-    const weight = index - lower;
-
-    if (upper >= sorted.length) {
-      return sorted[lower];
-    }
-
-    return sorted[lower] * (1 - weight) + sorted[upper] * weight;
   }
 }
