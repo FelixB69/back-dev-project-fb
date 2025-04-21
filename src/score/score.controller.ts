@@ -1,4 +1,4 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Get } from '@nestjs/common';
 import { ScoreService } from './score.service';
 import { Score } from './score.entity';
 
@@ -18,5 +18,10 @@ export class ScoreController {
   @Post('statistics')
   async calculateStatistics(@Body() target: Score): Promise<any> {
     return this.scoreService.calculateStatistics(target);
+  }
+
+  @Get('all')
+  async getAllScores(): Promise<Score[]> {
+    return this.scoreService.findAll();
   }
 }

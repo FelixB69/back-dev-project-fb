@@ -17,6 +17,9 @@ export class Score {
   @Column({ type: 'varchar', length: 100 })
   location: string;
 
+  @Column({ length: 100 })
+  email: string;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }

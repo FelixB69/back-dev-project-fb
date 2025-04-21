@@ -4,6 +4,9 @@ import { SalaryService } from '../salary/salary.service';
 import { Salary } from '../salary/salary.entity';
 import { Score } from './score.entity';
 import { ScoreCalcul } from './score-calcul';
+import { CreateScoreDto } from './create-score.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
 @Injectable()
 export class ScoreService {
@@ -26,6 +29,8 @@ export class ScoreService {
   constructor(
     private readonly salaryService: SalaryService,
     private readonly scoreCalcul: ScoreCalcul,
+    @InjectRepository(Score)
+    private readonly scoreRepository: Repository<Score>,
   ) {
     // Initialize the model on service creation
     this.modelReady = this.initializeModel();
@@ -161,6 +166,12 @@ export class ScoreService {
 
   // Compute full salary statistics for a given profile
   public async calculateStatistics(target: Score): Promise<any> {
+    const createScore = await this.createScore({
+      location: target.location,
+      total_xp: target.total_xp,
+      compensation: target.compensation,
+      email: target.email,
+    });
     const salaries = await this.salaryService.findAll();
 
     const scores = await Promise.all(
@@ -172,9 +183,10 @@ export class ScoreService {
           compensation: comparison.compensation,
           id: comparison.id,
           createdAt: comparison.date,
+          email: null,
         };
 
-        return this.calculateSimilarityScore(infos); // ← il faut le `return` ici !
+        return this.calculateSimilarityScore(infos);
       }),
     );
 
@@ -316,5 +328,19 @@ export class ScoreService {
       range: `${(i / numBuckets).toFixed(1)}–${((i + 1) / numBuckets).toFixed(1)}`,
       count,
     }));
+  }
+
+  // create a new score in DB
+  async createScore(createScoreDto: CreateScoreDto) {
+    const newScore = this.scoreRepository.create({
+      ...createScoreDto,
+      createdAt: new Date(),
+    });
+    return await this.scoreRepository.save(newScore);
+  }
+
+  // get all scores from DB
+  async findAll(): Promise<Score[]> {
+    return await this.scoreRepository.find();
   }
 }

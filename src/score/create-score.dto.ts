@@ -1,7 +1,7 @@
 // create-salary.dto.ts
 import { IsString, IsNotEmpty, IsNumber, IsInt } from 'class-validator';
 
-export class CreateSalaryDto {
+export class CreateScoreDto {
   @IsString()
   @IsNotEmpty()
   readonly location: string;
