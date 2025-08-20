@@ -250,15 +250,25 @@ export class ScoreService {
     return this.bound01(s);
   }
 
-  // calculateSimilarityScore now uses ONLY profile similarity
+  // ---------- Similarity (alignée sur la cohérence) ----------
+  /**
+   * Measures the proximity of a "comparison" salary to the salary
+   * expected for the target profile, using the SAME metric as consistency:
+   * score = 1 - |actual - predicted| / actual (bounded at [0,1])
+   * Here, "predicted" is the model's prediction for the target.
+   */
   private async calculateSimilarityScore(
     comparison: Score,
     target: Score,
   ): Promise<number> {
-    return this.featureSimilarity(
-      { location: target.location, xp: target.total_xp ?? 0 },
-      { location: comparison.location, xp: comparison.total_xp ?? 0 },
-    );
+    await this.modelReady;
+    const predictedForTarget = await this.predictCompensation(target);
+
+    const actual = comparison.compensation ?? 0;
+    if (actual <= 0) return 0;
+
+    const relErr = Math.abs(actual - predictedForTarget) / actual;
+    return this.bound01(1 - relErr);
   }
 
   // Coherence (relative salary error, unchanged)
