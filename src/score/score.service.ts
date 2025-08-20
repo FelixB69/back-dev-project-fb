@@ -1,6 +1,6 @@
 /* eslint-disable prettier/prettier */
 import * as tf from '@tensorflow/tfjs';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { SalaryService } from '../salary/salary.service';
 import { Salary } from '../salary/salary.entity';
 import { Score } from './score.entity';
@@ -11,7 +11,6 @@ import { Repository } from 'typeorm';
 
 @Injectable()
 export class ScoreService {
-  private readonly logger = new Logger(ScoreService.name);
   private model: tf.LayersModel;
   private modelReady: Promise<void>;
 
@@ -53,12 +52,12 @@ export class ScoreService {
     try {
       if (this.enableModelPersistence) {
         this.model = await tf.loadLayersModel(`${this.modelPath}/model.json`);
-        this.logger.log('Modèle chargé depuis le disque.');
+        console.log('Modèle chargé depuis le disque.');
         await this.initializeAndTrain(true); // recalc min/max + maps
         return;
       }
     } catch (e) {
-      this.logger.warn(`Chargement du modèle impossible: ${e}`);
+      console.warn(`Chargement du modèle impossible: ${e}`);
     }
     await this.initializeAndTrain(false);
   }
@@ -71,7 +70,7 @@ export class ScoreService {
   private async initializeAndTrain(warmStatsOnly: boolean) {
     const salaries = await this.salaryService.findAll();
     if (!salaries || salaries.length < 5) {
-      this.logger.warn('Pas assez de données pour entraîner le modèle.');
+      console.warn('Pas assez de données pour entraîner le modèle.');
       this.model = tf.sequential({
         layers: [tf.layers.dense({ inputShape: [2], units: 1 })],
       });
@@ -168,7 +167,7 @@ export class ScoreService {
           best = val;
           patience = 0;
         } else if (++patience >= maxPatience) {
-          this.logger.log(`Early stopping @${e}`);
+          console.log(`Early stopping @${e}`);
           break;
         }
       }
@@ -178,10 +177,10 @@ export class ScoreService {
       try {
         if (this.enableModelPersistence) {
           await this.model.save(this.modelPath);
-          this.logger.log('Modèle sauvegardé sur le disque.');
+          console.log('Modèle sauvegardé sur le disque.');
         }
       } catch (e) {
-        this.logger.warn(`Sauvegarde du modèle impossible: ${e}`);
+        console.warn(`Sauvegarde du modèle impossible: ${e}`);
       }
     }
 

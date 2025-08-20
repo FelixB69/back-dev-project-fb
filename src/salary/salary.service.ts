@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 // salary.service.ts
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
