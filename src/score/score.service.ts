@@ -1,5 +1,6 @@
+/* eslint-disable prettier/prettier */
 import * as tf from '@tensorflow/tfjs';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SalaryService } from '../salary/salary.service';
 import { Salary } from '../salary/salary.entity';
 import { Score } from './score.entity';
@@ -10,21 +11,34 @@ import { Repository } from 'typeorm';
 
 @Injectable()
 export class ScoreService {
-  // TensorFlow model instance
-  private model: tf.Sequential;
-
-  // Promise that resolves when the model is trained and ready
+  private readonly logger = new Logger(ScoreService.name);
+  private model: tf.LayersModel;
   private modelReady: Promise<void>;
 
-  // Min/max ranges for normalizing input features
+  // Cache to avoid retraining on each request
+  private trainCache: {
+    salaries: Salary[];
+    locations: string[];
+    locationMap: Map<string, number>;
+  } | null = null;
+
+  // we keep only 2 features: locationIndex & total_xp
   private inputMinMax: {
-    xp: [number, number];
-    companyXp: [number, number];
     location: [number, number];
+    xp: [number, number];
   };
 
-  // Min/max range for normalizing the output (compensation)
   private outputMinMax: [number, number];
+
+  // persistence available if tfjs-node
+  private readonly enableModelPersistence = !!(tf as any).node;
+  private readonly modelPath = 'file://./models/score-model-2f';
+
+  // Similarity weights (can be injected via config if needed)
+  private readonly wLocation = 0.6;
+  private readonly wXp = 0.4;
+  // Width (standard deviation) for the Gaussian kernel in years
+  private readonly sigmaXp = 2; // ~ 2 years ⇒ reasonable decay
 
   constructor(
     private readonly salaryService: SalaryService,
@@ -32,161 +46,254 @@ export class ScoreService {
     @InjectRepository(Score)
     private readonly scoreRepository: Repository<Score>,
   ) {
-    // Initialize the model on service creation
-    this.modelReady = this.initializeModel();
+    this.modelReady = this.bootstrapModel();
   }
 
-  // Initializes and trains the TensorFlow model
-  private async initializeModel() {
-    // Define a simple sequential model with one dense layer
-    this.model = tf.sequential();
-    this.model.add(tf.layers.dense({ inputShape: [3], units: 1 }));
+  private async bootstrapModel() {
+    try {
+      if (this.enableModelPersistence) {
+        this.model = await tf.loadLayersModel(`${this.modelPath}/model.json`);
+        this.logger.log('Modèle chargé depuis le disque.');
+        await this.initializeAndTrain(true); // recalc min/max + maps
+        return;
+      }
+    } catch (e) {
+      this.logger.warn(`Chargement du modèle impossible: ${e}`);
+    }
+    await this.initializeAndTrain(false);
+  }
 
-    // Compile with SGD optimizer and MSE loss
-    this.model.compile({
-      optimizer: tf.train.sgd(0.01),
-      loss: 'meanSquaredError',
-    });
+  public async refreshModel(): Promise<void> {
+    this.modelReady = this.initializeAndTrain(false);
+    await this.modelReady;
+  }
 
+  private async initializeAndTrain(warmStatsOnly: boolean) {
     const salaries = await this.salaryService.findAll();
+    if (!salaries || salaries.length < 5) {
+      this.logger.warn('Pas assez de données pour entraîner le modèle.');
+      this.model = tf.sequential({
+        layers: [tf.layers.dense({ inputShape: [2], units: 1 })],
+      });
+      this.model.compile({
+        optimizer: tf.train.adam(0.01),
+        loss: 'meanSquaredError',
+      });
+      this.inputMinMax = { xp: [0, 1], location: [0, 1] };
+      this.outputMinMax = [0, 1];
+      this.trainCache = {
+        salaries: [],
+        locations: ['other'],
+        locationMap: new Map([['other', 0]]),
+      };
+      return;
+    }
 
-    // Encode location as an index
-    const locations = [...new Set(salaries.map((s) => s.location))];
+    const uniqueLocations = [
+      ...new Set(salaries.map((s) => s.location).filter(Boolean)),
+    ];
+    const locations = [
+      'other',
+      ...uniqueLocations.filter((l) => l !== 'other'),
+    ];
     const locationMap = new Map(locations.map((loc, idx) => [loc, idx]));
 
-    // Extract raw input features
+    // features: [locationIndex, total_xp]
     const inputsRaw = salaries.map((s) => [
-      locationMap.get(s.location) ?? 0,
+      locationMap.get(s.location ?? 'other') ?? 0,
       s.total_xp ?? 0,
-      s.company_xp ?? 0,
     ]);
-
     const outputsRaw = salaries.map((s) => s.compensation);
 
-    // Compute min/max for normalization
-    const xpValues = inputsRaw.map((d) => d[1]);
-    const companyXpValues = inputsRaw.map((d) => d[2]);
-    const locationValues = inputsRaw.map((d) => d[0]);
-
-    this.inputMinMax = {
-      xp: [Math.min(...xpValues), Math.max(...xpValues)],
-      companyXp: [Math.min(...companyXpValues), Math.max(...companyXpValues)],
-      location: [Math.min(...locationValues), Math.max(...locationValues)],
+    const col = (arr: number[][], i: number) => arr.map((r) => r[i]);
+    const makeMinMax = (values: number[]): [number, number] => {
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      return min === max ? ([min, min + 1] as [number, number]) : [min, max];
     };
 
-    this.outputMinMax = [Math.min(...outputsRaw), Math.max(...outputsRaw)];
+    this.inputMinMax = {
+      location: makeMinMax(col(inputsRaw, 0)),
+      xp: makeMinMax(col(inputsRaw, 1)),
+    };
+    this.outputMinMax = makeMinMax(outputsRaw);
 
-    // Normalize input data
-    const inputs = inputsRaw.map(([loc, xp, compXp]) => [
-      this.normalizeValue(loc, ...this.inputMinMax.location),
-      this.normalizeValue(xp, ...this.inputMinMax.xp),
-      this.normalizeValue(compXp, ...this.inputMinMax.companyXp),
+    const normalize = (v: number, [min, max]: [number, number]) => {
+      const z = (v - min) / (max - min);
+      return Math.max(0, Math.min(1, z));
+    };
+
+    const inputs = inputsRaw.map(([loc, xp]) => [
+      normalize(loc, this.inputMinMax.location),
+      normalize(xp, this.inputMinMax.xp),
     ]);
+    const outputs = outputsRaw.map((c) => [normalize(c, this.outputMinMax)]);
 
-    // Normalize output data
-    const outputs = outputsRaw.map((c) => [
-      this.normalizeValue(c, ...this.outputMinMax),
-    ]);
+    const x = tf.tensor2d(inputs);
+    const y = tf.tensor2d(outputs);
 
-    // Convert data to tensors
-    const inputTensor = tf.tensor2d(inputs);
-    const outputTensor = tf.tensor2d(outputs);
+    if (!this.model || !warmStatsOnly) {
+      // small MLP 2→16→8→1
+      const model = tf.sequential();
+      model.add(
+        tf.layers.dense({ inputShape: [2], units: 16, activation: 'relu' }),
+      );
+      model.add(tf.layers.dense({ units: 8, activation: 'relu' }));
+      model.add(tf.layers.dense({ units: 1 }));
+      model.compile({
+        optimizer: tf.train.adam(0.01),
+        loss: 'meanSquaredError',
+        metrics: ['mse'],
+      });
 
-    // Train the model
-    await this.model.fit(inputTensor, outputTensor, {
-      epochs: 100,
-    });
+      // early-stopping simple
+      let best = Number.POSITIVE_INFINITY;
+      let patience = 0;
+      const maxPatience = 10;
+      const epochs = 200;
+
+      for (let e = 0; e < epochs; e++) {
+        const h = await model.fit(x, y, {
+          batchSize: 32,
+          epochs: 1,
+          validationSplit: 0.1,
+          shuffle: true,
+          verbose: 0,
+        });
+        const val =
+          (h.history.val_loss?.[0] as number) ??
+          (h.history.loss?.[0] as number) ??
+          Infinity;
+        if (val + 1e-6 < best) {
+          best = val;
+          patience = 0;
+        } else if (++patience >= maxPatience) {
+          this.logger.log(`Early stopping @${e}`);
+          break;
+        }
+      }
+
+      this.model = model;
+
+      try {
+        if (this.enableModelPersistence) {
+          await this.model.save(this.modelPath);
+          this.logger.log('Modèle sauvegardé sur le disque.');
+        }
+      } catch (e) {
+        this.logger.warn(`Sauvegarde du modèle impossible: ${e}`);
+      }
+    }
+
+    this.trainCache = { salaries, locations, locationMap };
+
+    x.dispose();
+    y.dispose();
   }
 
-  // Convert a location string to its corresponding index
-  private async locationToIndex(location: string): Promise<number> {
-    const salaries = await this.salaryService.findAll();
-    const locations = [...new Set(salaries.map((salary) => salary.location))];
-    return locations.indexOf(location);
+  private locationToIndex(location: string): number {
+    const idx = this.trainCache?.locationMap.get(location ?? 'other');
+    return typeof idx === 'number' ? idx : 0; // other
   }
 
-  // Normalize a value between 0 and 1
   private normalizeValue(value: number, min: number, max: number): number {
-    return (value - min) / (max - min);
+    if (min === max) return 0;
+    const z = (value - min) / (max - min);
+    return Math.max(0, Math.min(1, z));
   }
 
-  // Compare a profile with another to compute a similarity score
-  private async calculateSimilarityScore(comparison: Score): Promise<number> {
-    const predicted = await this.predictCompensation(comparison);
-    const actual = comparison.compensation;
-
-    const score =
-      actual === 0 ? 0 : 1 - Math.abs((actual - predicted) / actual); // comme coherenceScore
-
-    return score;
+  private bound01(v: number) {
+    return Math.max(0, Math.min(1, v));
   }
 
-  // Compare predicted vs actual salary to assess coherence
-  public async calculateCoherenceScore(target: Score): Promise<number> {
-    const predictedCompensation = await this.predictCompensation(target);
-    const actualCompensation = target.compensation;
-
-    const coherenceScore =
-      actualCompensation === 0
-        ? 0
-        : 1 -
-          Math.abs(
-            (actualCompensation - predictedCompensation) / actualCompensation,
-          );
-
-    return coherenceScore;
-  }
-
-  // Predict salary using the model for a given profile
+  // ---------- PREDICTION (based on 2 features) ----------
   private async predictCompensation(target: Score): Promise<number> {
     await this.modelReady;
 
-    const locationIndex = await this.locationToIndex(target.location);
-
-    // Normalize input features
+    const locIdx = this.locationToIndex(target.location);
     const inputNorm = [
-      this.normalizeValue(locationIndex, ...this.inputMinMax.location),
+      this.normalizeValue(locIdx, ...this.inputMinMax.location),
       this.normalizeValue(target.total_xp ?? 0, ...this.inputMinMax.xp),
-      this.normalizeValue(
-        target.company_xp ?? 0,
-        ...this.inputMinMax.companyXp,
-      ),
     ];
 
-    // Predict and denormalize output
     const inputTensor = tf.tensor2d([inputNorm]);
     const prediction = this.model.predict(inputTensor) as tf.Tensor;
-    const normValue = prediction.dataSync()[0];
-    const denormValue =
-      normValue * (this.outputMinMax[1] - this.outputMinMax[0]) +
-      this.outputMinMax[0];
+    const normValue = (await prediction.data())[0];
+    inputTensor.dispose();
+    prediction.dispose();
 
-    return denormValue;
+    const [omin, omax] = this.outputMinMax;
+    return normValue * (omax - omin) + omin;
   }
 
-  // Compute full salary statistics for a given profile
+  // ---------- Similarity (ONLY location & xp) ----------
+  /**
+   * Similarity feature-based :
+   *  - locationSim: 1 if same city; otherwise decay ~ exp(-d^2/2)
+   *  - xpSim:       exp(- (Δxp)^2 / (2*sigma^2))
+   * Final score: wLocation*locationSim + wXp*xpSim  (bounded [0,1])
+   */
+  private featureSimilarity(
+    a: { location: string; xp: number },
+    b: { location: string; xp: number },
+  ): number {
+    const ia = this.locationToIndex(a.location);
+    const ib = this.locationToIndex(b.location);
+    const dLoc = Math.abs(ia - ib);
+
+    // If same location ⇒ 1 ; otherwise soft decay according to index distance
+    const locationSim = Math.exp(-(dLoc * dLoc) / 2);
+
+    const dx = (a.xp ?? 0) - (b.xp ?? 0);
+    const xpSim = Math.exp(-((dx * dx) / (2 * this.sigmaXp * this.sigmaXp)));
+
+    const s = this.wLocation * locationSim + this.wXp * xpSim;
+    return this.bound01(s);
+  }
+
+  // calculateSimilarityScore now uses ONLY profile similarity
+  private async calculateSimilarityScore(
+    comparison: Score,
+    target: Score,
+  ): Promise<number> {
+    return this.featureSimilarity(
+      { location: target.location, xp: target.total_xp ?? 0 },
+      { location: comparison.location, xp: comparison.total_xp ?? 0 },
+    );
+  }
+
+  // Coherence (relative salary error, unchanged)
+  public async calculateCoherenceScore(target: Score): Promise<number> {
+    const predicted = await this.predictCompensation(target);
+    const actual = target.compensation;
+    const raw = actual === 0 ? 0 : 1 - Math.abs((actual - predicted) / actual);
+    return this.bound01(raw);
+  }
+
+  // ---------- STATISTICS ----------
   public async calculateStatistics(target: Score): Promise<any> {
-    const createScore = await this.createScore({
+    await this.modelReady;
+
+    // save score
+    await this.createScore({
       location: target.location,
       total_xp: target.total_xp,
       compensation: target.compensation,
       email: target.email,
     });
-    const salaries = await this.salaryService.findAll();
 
+    const salaries =
+      this.trainCache?.salaries ?? (await this.salaryService.findAll());
+
+    // purely similarity distribution (location,xp) relative to the target
     const scores = await Promise.all(
-      salaries.map((comparison) => {
-        const infos = {
-          location: comparison.location,
-          total_xp: comparison.total_xp,
-          company_xp: comparison.company_xp,
-          compensation: comparison.compensation,
-          id: comparison.id,
-          createdAt: comparison.date,
-          email: null,
-        };
-
-        return this.calculateSimilarityScore(infos);
+      salaries.map(async (s) => {
+        const comp: Score = {
+          location: s.location,
+          total_xp: s.total_xp,
+          compensation: s.compensation,
+        } as any;
+        return this.calculateSimilarityScore(comp, target);
       }),
     );
 
@@ -205,16 +312,17 @@ export class ScoreService {
       actualCompensation,
     );
 
-    const numHigher = scores.filter((s) => s > coherenceScore).length;
-    const numLower = scores.filter((s) => s < coherenceScore).length;
+    // comparison: % of profiles (by location/near xp) below
+    const numHigher = scores.filter((s) => s > 0.5).length; // arbitrary threshold for “nearby”
+    const numLower = scores.length - numHigher;
     const similarPercentage = Math.round(
-      (numLower / (numHigher + numLower)) * 100,
+      (numLower / Math.max(1, numHigher + numLower)) * 100,
     );
 
     const coherenceComment =
-      coherenceScore > 0.8
+      coherenceScore > 0.9
         ? 'Ton salaire est parfaitement cohérent avec ton parcours'
-        : coherenceScore > 0.6
+        : coherenceScore > 0.7
           ? 'Ton salaire est globalement cohérent avec ton parcours'
           : coherenceScore > 0.4
             ? 'Ton salaire semble un peu décalé par rapport à ton profil'
@@ -225,17 +333,17 @@ export class ScoreService {
     return {
       diagnostic: {
         title:
-          coherenceScore > 0.8
+          coherenceScore > 0.9
             ? 'Parfaitement aligné 👌'
-            : coherenceScore > 0.6
+            : coherenceScore > 0.7
               ? 'Globalement cohérent ✅'
               : coherenceScore > 0.4
                 ? 'Léger décalage 🤔'
                 : 'Atypique 🔎',
         icon:
-          coherenceScore > 0.8
+          coherenceScore > 0.9
             ? '👌'
-            : coherenceScore > 0.6
+            : coherenceScore > 0.7
               ? '✅'
               : coherenceScore > 0.4
                 ? '🤔'
@@ -243,13 +351,14 @@ export class ScoreService {
         description: coherenceComment,
       },
 
+      // estimated gap
       estimatedGap: {
         predicted: Math.round(predictedCompensation),
         actual: Math.round(actualCompensation),
         difference: Math.round(actualCompensation - predictedCompensation),
         percentage: +(
           ((actualCompensation - predictedCompensation) /
-            predictedCompensation) *
+            Math.max(1, predictedCompensation)) *
           100
         ).toFixed(1),
         comment:
@@ -260,6 +369,7 @@ export class ScoreService {
               : 'Tu gagnes exactement ce qui est attendu.',
       },
 
+      // position relative
       salaryPosition: {
         percentile: percentileRank,
         rankLabel:
@@ -272,16 +382,15 @@ export class ScoreService {
                 : percentileRank >= 25
                   ? 'moyenne basse'
                   : 'bas de l’échelle',
-        comparison: `Tu gagnes plus que ${similarPercentage}% des personnes avec un profil comparable.`,
+        comparison: `Parmi les profils proches (localisation & XP), tu gagnes plus que ${similarPercentage}% d'entre eux.`,
       },
 
-      conseil:
-        coherenceScore > 0.7 &&
-        actualCompensation < predictedCompensation &&
-        (predictedCompensation - actualCompensation) / predictedCompensation >
-          0.1
-          ? 'Tu pourrais envisager de négocier une revalorisation salariale.'
-          : 'Reste dans ta zone de confort et continue de progresser dans ta carrière',
+      // “main comparison” info
+      similarityConfig: {
+        wLocation: this.wLocation,
+        wXp: this.wXp,
+        sigmaXp: this.sigmaXp,
+      },
 
       coherenceScore,
       meanScore,
@@ -291,6 +400,12 @@ export class ScoreService {
         averageByXp,
         histogram: this.buildHistogram(scores, 10),
       },
+
+      meta: {
+        locations: this.trainCache?.locations ?? [],
+        inputMinMax: this.inputMinMax,
+        outputMinMax: this.outputMinMax,
+      },
     };
   }
 
@@ -298,39 +413,34 @@ export class ScoreService {
     data: Salary[],
   ): { xp: number; average: number }[] {
     const grouped = new Map<number, number[]>();
-
     for (const item of data) {
       const xp = Math.round(item.total_xp ?? 0);
       if (!grouped.has(xp)) grouped.set(xp, []);
-      grouped.get(xp)?.push(item.compensation);
+      grouped.get(xp)!.push(item.compensation);
     }
-
     const result = [...grouped.entries()].map(([xp, comps]) => ({
       xp,
       average: Math.round(comps.reduce((a, b) => a + b, 0) / comps.length),
     }));
-
     return result.sort((a, b) => a.xp - b.xp);
   }
 
-  // Build histogram from score distribution
   private buildHistogram(
     values: number[],
     numBuckets: number,
   ): { range: string; count: number }[] {
     const buckets = Array(numBuckets).fill(0);
     for (const v of values) {
-      const idx = Math.min(Math.floor(v * numBuckets), numBuckets - 1);
+      const z = this.bound01(v);
+      const idx = Math.min(Math.floor(z * numBuckets), numBuckets - 1);
       buckets[idx]++;
     }
-
     return buckets.map((count, i) => ({
       range: `${(i / numBuckets).toFixed(1)}–${((i + 1) / numBuckets).toFixed(1)}`,
       count,
     }));
   }
 
-  // create a new score in DB
   async createScore(createScoreDto: CreateScoreDto) {
     const newScore = this.scoreRepository.create({
       ...createScoreDto,
@@ -339,7 +449,6 @@ export class ScoreService {
     return await this.scoreRepository.save(newScore);
   }
 
-  // get all scores from DB
   async findAll(): Promise<Score[]> {
     return await this.scoreRepository.find();
   }
