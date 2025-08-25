@@ -1,6 +1,5 @@
-/* eslint-disable prettier/prettier */
 import * as tf from '@tensorflow/tfjs';
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { SalaryService } from '../salary/salary.service';
 import { Salary } from '../salary/salary.entity';
 import { Score } from './score.entity';
@@ -8,7 +7,7 @@ import { ScoreCalcul } from './score-calcul';
 import { CreateScoreDto } from './create-score.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-
+import { ScoreResult } from './score-result.entity';
 @Injectable()
 export class ScoreService {
   private model: tf.LayersModel;
@@ -44,6 +43,8 @@ export class ScoreService {
     private readonly scoreCalcul: ScoreCalcul,
     @InjectRepository(Score)
     private readonly scoreRepository: Repository<Score>,
+    @InjectRepository(ScoreResult)
+    private readonly scoreResultRepository: Repository<ScoreResult>, // <—
   ) {
     this.modelReady = this.bootstrapModel();
   }
@@ -456,6 +457,51 @@ export class ScoreService {
       createdAt: new Date(),
     });
     return await this.scoreRepository.save(newScore);
+  }
+
+  /**
+   * Calcule les stats, les sauvegarde en base et renvoie { id, ...output }.
+   * Le front peut stocker l’id et relire plus tard le même résultat.
+   */
+  public async analyzeAndSave(dto: CreateScoreDto) {
+    // On construit un "target" minimal pour réutiliser votre pipeline
+    const target: Score = {
+      location: dto.location,
+      total_xp: dto.total_xp ?? 0,
+      compensation: dto.compensation,
+      email: dto.email,
+    } as any;
+
+    // Calcule toutes les stats avec votre logique existante
+    const output = await this.calculateStatistics(target);
+
+    // Persistance en 1 ligne (input + output)
+    const row = this.scoreResultRepository.create({
+      input: {
+        location: dto.location ?? null,
+        total_xp: dto.total_xp ?? null,
+        compensation: dto.compensation,
+        email: dto.email ?? null,
+      },
+      output,
+    });
+    const saved = await this.scoreResultRepository.save(row);
+
+    // Retourne l’id + le résultat au front immédiatement
+    return { id: saved.id, ...output };
+  }
+
+  /** Récupère l’analyse complète par id (pour le front) */
+  public async getAnalysisById(id: string) {
+    const found = await this.scoreResultRepository.findOne({ where: { id } });
+    if (!found) throw new NotFoundException('ScoreResult introuvable');
+    // vous pouvez décider de renvoyer { input, output } ou seulement output
+    return {
+      id: found.id,
+      input: found.input,
+      output: found.output,
+      createdAt: found.createdAt,
+    };
   }
 
   async findAll(): Promise<Score[]> {
