@@ -20,6 +20,8 @@ export class ScoreService {
     locationMap: Map<string, number>;
   } | null = null;
 
+  private numLocations = 0;
+
   // we keep only 2 features: locationIndex & total_xp
   private inputMinMax: {
     location: [number, number];
@@ -71,13 +73,15 @@ export class ScoreService {
   private async initializeAndTrain(warmStatsOnly: boolean) {
     const salaries = await this.salaryService.findAll();
     if (!salaries || salaries.length < 5) {
-      console.warn('Pas assez de données pour entraîner le modèle.');
+      this.numLocations = 1;
       this.model = tf.sequential({
-        layers: [tf.layers.dense({ inputShape: [2], units: 1 })],
+        layers: [
+          tf.layers.dense({ inputShape: [this.numLocations + 1], units: 1 }),
+        ],
       });
       this.model.compile({
         optimizer: tf.train.adam(0.01),
-        loss: 'meanSquaredError',
+        loss: 'meanAbsoluteError',
       });
       this.inputMinMax = { xp: [0, 1], location: [0, 1] };
       this.outputMinMax = [0, 1];
@@ -97,8 +101,9 @@ export class ScoreService {
       ...uniqueLocations.filter((l) => l !== 'other'),
     ];
     const locationMap = new Map(locations.map((loc, idx) => [loc, idx]));
+    this.numLocations = locations.length;
 
-    // features: [locationIndex, total_xp]
+    // bruts features : [locationIndex, total_xp]
     const inputsRaw = salaries.map((s) => [
       locationMap.get(s.location ?? 'other') ?? 0,
       s.total_xp ?? 0,
@@ -112,8 +117,9 @@ export class ScoreService {
       return min === max ? ([min, min + 1] as [number, number]) : [min, max];
     };
 
+    // In one-hot, we normalize only xp (city will be binary)
     this.inputMinMax = {
-      location: makeMinMax(col(inputsRaw, 0)),
+      location: [0, 1], // kept for compatibility, not used
       xp: makeMinMax(col(inputsRaw, 1)),
     };
     this.outputMinMax = makeMinMax(outputsRaw);
@@ -123,8 +129,13 @@ export class ScoreService {
       return Math.max(0, Math.min(1, z));
     };
 
-    const inputs = inputsRaw.map(([loc, xp]) => [
-      normalize(loc, this.inputMinMax.location),
+    // Helpers one-hot
+    const toOneHot = (i: number) =>
+      Array.from({ length: this.numLocations }, (_, k) => (k === i ? 1 : 0));
+
+    // Final entries: [...oneHot(loc), xpNorm]
+    const inputs = inputsRaw.map(([locIdx, xp]) => [
+      ...toOneHot(locIdx),
       normalize(xp, this.inputMinMax.xp),
     ]);
     const outputs = outputsRaw.map((c) => [normalize(c, this.outputMinMax)]);
@@ -133,20 +144,24 @@ export class ScoreService {
     const y = tf.tensor2d(outputs);
 
     if (!this.model || !warmStatsOnly) {
-      // small MLP 2→16→8→1
+      // MLP adapted to the new input dimension
       const model = tf.sequential();
       model.add(
-        tf.layers.dense({ inputShape: [2], units: 16, activation: 'relu' }),
+        tf.layers.dense({
+          inputShape: [this.numLocations + 1], // <— L (one-hot) + 1 (xp)
+          units: 64,
+          activation: 'relu',
+        }),
       );
-      model.add(tf.layers.dense({ units: 8, activation: 'relu' }));
+      model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
       model.add(tf.layers.dense({ units: 1 }));
       model.compile({
         optimizer: tf.train.adam(0.01),
-        loss: 'meanSquaredError',
+        loss: 'meanAbsoluteError',
         metrics: ['mse'],
       });
 
-      // early-stopping simple
+      // Early stopping inchangé
       let best = Number.POSITIVE_INFINITY;
       let patience = 0;
       const maxPatience = 10;
@@ -211,12 +226,18 @@ export class ScoreService {
     await this.modelReady;
 
     const locIdx = this.locationToIndex(target.location);
-    const inputNorm = [
-      this.normalizeValue(locIdx, ...this.inputMinMax.location),
-      this.normalizeValue(target.total_xp ?? 0, ...this.inputMinMax.xp),
-    ];
+    const xpNorm = this.normalizeValue(
+      target.total_xp ?? 0,
+      ...this.inputMinMax.xp,
+    );
 
-    const inputTensor = tf.tensor2d([inputNorm]);
+    // one-hot for inference
+    const oneHot = Array.from({ length: this.numLocations }, (_, k) =>
+      k === locIdx ? 1 : 0,
+    );
+    const input = [...oneHot, xpNorm];
+
+    const inputTensor = tf.tensor2d([input]);
     const prediction = this.model.predict(inputTensor) as tf.Tensor;
     const normValue = (await prediction.data())[0];
     inputTensor.dispose();
