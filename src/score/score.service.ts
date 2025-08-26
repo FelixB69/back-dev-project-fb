@@ -360,6 +360,7 @@ export class ScoreService {
             : 'Ton salaire est très atypique par rapport à ton profil';
 
     const averageByXp = this.computeAverageSalaryByExperience(salaries);
+    const medianByXp = this.computeMedianSalaryByExperience(salaries);
 
     return {
       diagnostic: {
@@ -429,6 +430,7 @@ export class ScoreService {
 
       chartData: {
         averageByXp,
+        medianByXp,
         histogram: this.buildHistogram(scores, 10),
       },
 
@@ -444,15 +446,41 @@ export class ScoreService {
     data: Salary[],
   ): { xp: number; average: number }[] {
     const grouped = new Map<number, number[]>();
+
     for (const item of data) {
-      const xp = Math.round(item.total_xp ?? 0);
+      const xp = Math.floor(item.total_xp ?? 0); // années révolues
       if (!grouped.has(xp)) grouped.set(xp, []);
       grouped.get(xp)!.push(item.compensation);
     }
-    const result = [...grouped.entries()].map(([xp, comps]) => ({
-      xp,
-      average: Math.round(comps.reduce((a, b) => a + b, 0) / comps.length),
-    }));
+
+    const result = [...grouped.entries()].map(([xp, comps]) => {
+      const avg = comps.reduce((a, b) => a + b, 0) / comps.length;
+      return { xp, average: Math.round(avg) };
+    });
+
+    return result.sort((a, b) => a.xp - b.xp);
+  }
+
+  private computeMedianSalaryByExperience(
+    data: Salary[],
+  ): { xp: number; median: number }[] {
+    const grouped = new Map<number, number[]>();
+
+    for (const item of data) {
+      const xp = Math.floor(item.total_xp ?? 0); // années révolues
+      if (!grouped.has(xp)) grouped.set(xp, []);
+      grouped.get(xp)!.push(item.compensation);
+    }
+
+    const result = [...grouped.entries()].map(([xp, comps]) => {
+      const sorted = comps.slice().sort((a, b) => a - b);
+      const n = sorted.length;
+      const median =
+        n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+
+      return { xp, median: Math.round(median) };
+    });
+
     return result.sort((a, b) => a.xp - b.xp);
   }
 
