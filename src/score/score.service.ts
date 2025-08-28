@@ -556,4 +556,18 @@ export class ScoreService {
   async findAll(): Promise<Score[]> {
     return await this.scoreRepository.find();
   }
+
+  async findByEmail(email: string) {
+    const data = await this.scoreResultRepository.query(
+      `SELECT * FROM score_results WHERE JSON_EXTRACT(input, '$.email') = ?`,
+      [email],
+    );
+    const result = data.map((row) => {
+      return {
+        id: row.id,
+        input: JSON.parse(row.input),
+      };
+    });
+    return result;
+  }
 }
