@@ -12,6 +12,8 @@ async function bootstrap() {
     origin: [
       'https://dev-rh.felixberger.fr',
       'https://simulator-rh.felixberger.fr',
+      'https://simulateur.felixberger.fr',
+      'https://salaires.felixberger.fr',
       'http://localhost:3001',
       'http://localhost:3000',
     ], // Adresse du frontend
