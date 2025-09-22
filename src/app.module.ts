@@ -6,6 +6,8 @@ import { SalaryModule } from './salary/salary.module';
 import { Salary } from './salary/salary.entity';
 import * as dotenv from 'dotenv';
 import { ScoreModule } from './score/score.module';
+import { User } from './user/user.entity';
+import { RefreshToken } from './auth/refresh-token.entity';
 
 dotenv.config();
 
@@ -18,7 +20,7 @@ dotenv.config();
       username: process.env.DB_USERNAME,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_DATABASE,
-      entities: [Salary],
+      entities: [Salary, User, RefreshToken],
       autoLoadEntities: true,
       synchronize: true,
       retryAttempts: 10, // Attendre si la DB n'est pas prête
