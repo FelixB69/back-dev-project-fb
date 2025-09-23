@@ -6,9 +6,14 @@ import { ScoreController } from './score.controller';
 import { SalaryModule } from '../salary/salary.module'; // Ajuste selon ta structure
 import { ScoreCalcul } from './score-calcul';
 import { ScoreResult } from './score-result.entity';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Score, ScoreResult]), SalaryModule],
+  imports: [
+    TypeOrmModule.forFeature([Score, ScoreResult]),
+    SalaryModule,
+    AuthModule,
+  ],
   providers: [ScoreService, ScoreCalcul],
   controllers: [ScoreController],
   exports: [ScoreService],

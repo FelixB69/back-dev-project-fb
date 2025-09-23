@@ -8,6 +8,7 @@ import * as dotenv from 'dotenv';
 import { ScoreModule } from './score/score.module';
 import { User } from './user/user.entity';
 import { RefreshToken } from './auth/refresh-token.entity';
+import { AuthModule } from './auth/auth.module';
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ dotenv.config();
     }),
     SalaryModule,
     ScoreModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

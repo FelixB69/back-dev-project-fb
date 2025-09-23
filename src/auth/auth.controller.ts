@@ -16,7 +16,7 @@ const cookieOpts = {
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  @Post('signup')
+  @Post('signup-admin')
   async signup(
     @Body() dto: SignupDto,
     @Res({ passthrough: true }) res: Response,

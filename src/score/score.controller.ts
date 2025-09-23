@@ -1,7 +1,16 @@
-import { Controller, Post, Body, Get, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ScoreService } from './score.service';
 import { Score } from './score.entity';
 import { CreateScoreDto } from './create-score.dto';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 
 @Controller('scores')
 export class ScoreController {
@@ -21,6 +30,7 @@ export class ScoreController {
     return this.scoreService.calculateStatistics(target);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get('all')
   async getAllScores(): Promise<Score[]> {
     return this.scoreService.findAll();
