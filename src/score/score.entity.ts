@@ -20,6 +20,9 @@ export class Score {
   @Column({ length: 100 })
   email: string;
 
+  @Column({ type: 'boolean', default: false })
+  consent: boolean;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }

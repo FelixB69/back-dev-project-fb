@@ -311,6 +311,7 @@ export class ScoreService {
       total_xp: target.total_xp,
       compensation: target.compensation,
       email: target.email,
+      consent: target.consent,
     });
 
     const salaries =
@@ -519,6 +520,7 @@ export class ScoreService {
       total_xp: dto.total_xp ?? 0,
       compensation: dto.compensation,
       email: dto.email,
+      consent: dto.consent,
     } as any;
 
     // Calcule toutes les stats avec votre logique existante

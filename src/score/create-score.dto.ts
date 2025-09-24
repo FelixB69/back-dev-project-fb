@@ -17,4 +17,7 @@ export class CreateScoreDto {
   @IsString()
   @IsNotEmpty()
   readonly email: string;
+
+  @IsNotEmpty()
+  readonly consent: boolean;
 }
