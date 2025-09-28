@@ -3,7 +3,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SalaryModule } from './salary/salary.module';
-import { Salary } from './salary/salary.entity';
+import { Salary } from './salary/entities/salary.entity';
 import * as dotenv from 'dotenv';
 import { ScoreModule } from './score/score.module';
 import { User } from './user/user.entity';

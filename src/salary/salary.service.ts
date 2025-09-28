@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Salary } from './salary.entity';
+import { Salary } from './entities/salary.entity';
 import { Repository } from 'typeorm';
 import { CreateSalaryDto } from './create-salary.dto';
 import axios from 'axios';

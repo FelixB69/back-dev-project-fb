@@ -61,4 +61,8 @@ export class ScoreCalcul {
     const below = sorted.filter((v) => v < value).length;
     return Math.round((below / sorted.length) * 100);
   }
+
+  public normalizeValue(v: number): number {
+    return Math.max(0, Math.min(1, v));
+  }
 }

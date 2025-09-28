@@ -2,7 +2,7 @@
 import { Controller, Post, Body, Get, Param, Query } from '@nestjs/common';
 import { SalaryService } from './salary.service';
 import { CreateSalaryDto } from './create-salary.dto';
-import { Salary } from './salary.entity';
+import { Salary } from './entities/salary.entity';
 
 @Controller('salaries')
 export class SalaryController {
